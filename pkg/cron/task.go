@@ -15,6 +15,20 @@ var (
 	rangeMatcher     = regexp.MustCompile(`^(\d{1,2})-(\d{1,2})$`)
 )
 
+var (
+	Secondly = "@secondly"
+	Minutely = "@minutely"
+	Hourly   = "@hourly"
+)
+
+var (
+	macroMap = map[string]string{
+		Secondly: "*/1 * *",
+		Minutely: "0 */1 *",
+		Hourly:   "0 0 */1",
+	}
+)
+
 type Func func()
 
 type Task struct {
@@ -55,6 +69,16 @@ func (t *Task) Match(now time.Time) bool {
 }
 
 func parseCronExpressionString(expr string) (*Task, error) {
+	if strings.HasPrefix(expr, "@") {
+		e, ok := macroMap[expr]
+
+		if ok != true {
+			return nil, fmt.Errorf("unknown macro %s", expr)
+		}
+
+		return parseCronExpressionString(e)
+	}
+
 	expressions := strings.Split(expr, " ")
 
 	if len(expressions) < 3 {
