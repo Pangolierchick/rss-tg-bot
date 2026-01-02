@@ -4,6 +4,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"net/http"
 
 	"golang.org/x/net/html/charset"
 )
@@ -22,6 +23,23 @@ func Parse(r io.Reader) (*Feed, error) {
 	}
 
 	return &feed, nil
+}
+
+func Fetch(URL string) (*Feed, error) {
+	resp, err := http.Get(URL)
+
+	if err != nil {
+		return nil, err
+	}
+
+	feed, err := Parse(resp.Body)
+	defer resp.Body.Close()
+
+	if err != nil {
+		return nil, err
+	}
+
+	return feed, nil
 }
 
 type (
