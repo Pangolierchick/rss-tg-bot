@@ -17,9 +17,9 @@ type Subscriber struct {
 }
 
 type Subscription struct {
-	FeedID    int64     `db:"feed_id" json:"feed_id"`
-	ID        int64     `db:"subscriber_id" json:"subscriber_id"`
-	CreatedAt time.Time `db:"created_at" json:"created_at"`
+	FeedID       int64     `db:"feed_id" json:"feed_id"`
+	SubscriberID int64     `db:"subscriber_id" json:"subscriber_id"`
+	CreatedAt    time.Time `db:"created_at" json:"created_at"`
 }
 
 type FeedItem struct {
