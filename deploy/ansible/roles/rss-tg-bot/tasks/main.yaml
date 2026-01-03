@@ -37,5 +37,7 @@
 - name: start bot service
   community.docker.docker_compose_v2:
     project_src: /opt/rss-tg-bot
+    build: always
+    remove_images: local
     services:
       - bot
