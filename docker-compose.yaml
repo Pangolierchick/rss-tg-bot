@@ -1,0 +1,46 @@
+services:
+  db:
+    image: postgres:18
+    container_name: db
+    restart: always
+    environment:
+      POSTGRES_PASSWORD: password
+      POSTGRES_USER: user
+      POSTGRES_DB: rss-tg-bot
+    ports:
+      - 5432:5432
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+  db-migrate:
+    image: kukymbr/goose-docker:3.26.0
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./migrations:/migrations
+    environment:
+      GOOSE_DRIVER: postgres
+      GOOSE_DBSTRING: "host=db port=5432 user=user password=password dbname=rss-tg-bot"
+    networks:
+      - backend
+  bot:
+    container_name: rss-bot
+    build: .
+    restart: always
+    networks:
+      - backend
+    env_file:
+      - path: .env
+        required: true
+    depends_on:
+      db:
+        condition: service_healthy
+
+networks:
+  backend:
