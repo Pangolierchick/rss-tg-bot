@@ -70,13 +70,25 @@ func (f *Fetcher) Fetch(ctx context.Context) error {
 		for _, rssItem := range rss.Items {
 			h := sha1.New()
 			h.Write([]byte(rssItem.Title + rssItem.Description))
+			hash := h.Sum(nil)
+
+			guid := rssItem.GUID
+
+			if len(guid) == 0 {
+				guid = rssItem.Link
+			}
+
+			if len(guid) == 0 {
+				guid = string(hash)
+			}
+
 			modelItems = append(modelItems, &models.FeedItem{
 				FeedID:      feed.ID,
-				GUID:        rssItem.GUID,
+				GUID:        guid,
 				Title:       rssItem.Title,
 				Link:        rssItem.Link,
 				PublishedAt: rssItem.PublishedParsed,
-				ContentHash: h.Sum(nil),
+				ContentHash: hash,
 			})
 		}
 		err = f.repo.AddFeedItems(ctx, modelItems)
