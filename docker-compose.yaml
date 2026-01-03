@@ -29,6 +29,18 @@ services:
       GOOSE_DBSTRING: "host=db port=5432 user=user password=password dbname=rss-tg-bot"
     networks:
       - backend
+  bot:
+    container_name: rss-bot
+    build: .
+    restart: always
+    networks:
+      - backend
+    env_file:
+      - path: .env
+        required: true
+    depends_on:
+      db:
+        condition: service_healthy
 
 networks:
   backend:
