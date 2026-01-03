@@ -12,6 +12,9 @@ type Option func(*Crontab)
 type Crontab struct {
 	tasks []*Task
 
+	lastRun  time.Time
+	lastTick time.Time
+
 	pollingInterval time.Duration
 	mu              sync.Mutex
 }
@@ -74,20 +77,30 @@ func (c *Crontab) Run(ctx context.Context) chan struct{} {
 }
 
 func (c *Crontab) internalRun() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	now := time.Now().Truncate(time.Second)
 
+	c.mu.Lock()
+	if c.lastTick.Equal(now) {
+		c.mu.Unlock()
+		return
+	}
+	c.lastTick = now
+	tasksToRun := make([]*Task, 0)
 	for _, t := range c.tasks {
-		now := time.Now()
 		if t.Match(now) {
-			go func(t *Task) {
-				defer func() {
-					if r := recover(); r != nil {
-						slog.Error("task panicked:", "reason", r)
-					}
-				}()
-				t.task()
-			}(t)
+			tasksToRun = append(tasksToRun, t)
 		}
+	}
+	c.mu.Unlock()
+
+	for _, t := range tasksToRun {
+		go func(t *Task) {
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("task panicked:", "reason", r)
+				}
+			}()
+			t.task()
+		}(t)
 	}
 }

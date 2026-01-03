@@ -55,6 +55,11 @@ func NewTask(expr string, f Func) (*Task, error) {
 }
 
 func (t *Task) Match(now time.Time) bool {
+	now = now.Truncate(time.Second)
+
+	// fmt.Printf("now: %v\n", now)
+	// fmt.Printf("task: %+v\n", t)
+
 	if !slices.Contains(t.minute, int8(now.Minute())) ||
 		!slices.Contains(t.hour, int8(now.Hour())) ||
 		!slices.Contains(t.month, int8(now.Month())) ||
@@ -65,7 +70,7 @@ func (t *Task) Match(now time.Time) bool {
 	domMatch := slices.Contains(t.dom, int8(now.Day()))
 	dowMatch := slices.Contains(t.dow, int8(now.Weekday()))
 
-	return domMatch || dowMatch
+	return domMatch && dowMatch
 }
 
 func parseCronExpressionString(expr string) (*Task, error) {
@@ -96,7 +101,7 @@ func parseCronExpressionString(expr string) (*Task, error) {
 		return nil, fmt.Errorf("failed to parse %s: %w", "minutes", err)
 	}
 
-	hours, err := expandExpression(expressions[2], generateOptions(0, 25, 1))
+	hours, err := expandExpression(expressions[2], generateOptions(0, 24, 1))
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse %s: %w", "hours", err)
@@ -108,7 +113,7 @@ func parseCronExpressionString(expr string) (*Task, error) {
 		hour:   hours,
 		dom:    generateOptions(1, 32, 1),
 		month:  generateOptions(1, 13, 1),
-		dow:    generateOptions(0, 8, 1),
+		dow:    generateOptions(0, 7, 1),
 	}
 
 	if len(expressions) > 3 {
@@ -136,7 +141,11 @@ func parseCronExpressionString(expr string) (*Task, error) {
 			return nil, fmt.Errorf("failed to parse %s: %w", "dow", err)
 		}
 
-		task.dow = dow
+		if slices.Contains(dow, 7) && !slices.Contains(dow, 0) {
+			dow = append(dow, 0)
+		}
+	} else {
+		task.dow = append(task.dow, 0)
 	}
 
 	return &task, nil
