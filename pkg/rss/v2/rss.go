@@ -4,7 +4,9 @@ import (
 	"encoding/xml"
 	"fmt"
 	"io"
+	"time"
 
+	"github.com/Pangolierchick/rss-tg-bot/pkg/rss"
 	"golang.org/x/net/html/charset"
 )
 
@@ -22,6 +24,39 @@ func Parse(r io.Reader) (*Feed, error) {
 	}
 
 	return &feed, nil
+}
+
+func (i *Item) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+	type Alias Item
+	aux := &struct {
+		PubDate string `xml:"pubDate"`
+		Date    string `xml:"date"`
+		*Alias
+	}{
+		Alias: (*Alias)(i),
+	}
+
+	if err := d.DecodeElement(aux, &start); err != nil {
+		return err
+	}
+
+	if aux.PubDate != "" {
+		if t, err := rss.ParseDate(aux.PubDate); err == nil {
+			i.ParsedPubDate = t
+		} else {
+			fmt.Printf("failed to parse pubdate: %v", err)
+		}
+	}
+
+	if aux.Date != "" {
+		if t, err := rss.ParseDate(aux.Date); err == nil {
+			i.ParsedDate = t
+		} else {
+			fmt.Printf("failed to parse pubdate: %v", err)
+		}
+	}
+
+	return nil
 }
 
 type (
@@ -67,17 +102,19 @@ type (
 	}
 
 	Item struct {
-		XMLName     xml.Name    `xml:"item"`
-		Title       string      `xml:"title"`
-		Description string      `xml:"description"`
-		Content     string      `xml:"encoded"`
-		Categories  []string    `xml:"category"`
-		Link        string      `xml:"link"`
-		PubDate     string      `xml:"pubDate"`
-		Date        string      `xml:"date"`
-		Image       *Image      `xml:"image"`
-		ID          string      `xml:"guid"`
-		Enclosures  []Enclosure `xml:"enclosure"`
+		XMLName       xml.Name    `xml:"item"`
+		Title         string      `xml:"title"`
+		Description   string      `xml:"description"`
+		Content       string      `xml:"encoded"`
+		Categories    []string    `xml:"category"`
+		Link          string      `xml:"link"`
+		PubDate       string      `xml:"pubDate"`
+		Date          string      `xml:"date"`
+		ParsedPubDate time.Time   `xml:"-"`
+		ParsedDate    time.Time   `xml:"-"`
+		Image         *Image      `xml:"image"`
+		ID            string      `xml:"guid"`
+		Enclosures    []Enclosure `xml:"enclosure"`
 	}
 
 	Enclosure struct {
