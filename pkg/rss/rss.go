@@ -1,11 +1,13 @@
 package rss
 
 import (
-	"fmt"
 	"time"
 )
 
 var rssDateFormats = []string{
+	time.RFC1123Z,
+	time.RFC1123,
+	"Mon, 02 Jan 2006 15:04 MST",
 	"Mon, 02 Jan 06 15:04:05 -0700",
 	"Mon, _2 Jan 2006 15:04:05 -0700",
 	"Mon, 02 Jan 2006 15:04:05 -0700",
@@ -26,5 +28,5 @@ func ParseDate(s string) (time.Time, error) {
 			return t, nil
 		}
 	}
-	return time.Time{}, fmt.Errorf("failed to parse date: %q", s)
+	return time.Time{}, nil
 }
