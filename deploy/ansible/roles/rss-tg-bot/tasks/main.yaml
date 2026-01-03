@@ -1,0 +1,41 @@
+- name: install dependencies
+  ansible.builtin.package:
+    name:
+      - git
+      - make
+    state: present
+
+- name: ensure directories exists
+  ansible.builtin.file:
+    path: /opt/rss-tg-bot
+    state: directory
+
+- name: clone project
+  ansible.builtin.git:
+    dest: /opt/rss-tg-bot
+    repo: "{{ rss_tg_bot_repo }}"
+    version: "{{ rss_tg_bot_version }}"
+
+- name: render env file
+  ansible.builtin.template:
+    src: templates/.env.j2
+    dest: /opt/rss-tg-bot/.env
+
+- name: start database
+  community.docker.docker_compose_v2:
+    project_src: /opt/rss-tg-bot
+    wait: true
+    services:
+      - db
+
+- name: run migrations
+  community.docker.docker_compose_v2:
+    project_src: /opt/rss-tg-bot
+    services:
+      - db-migrate
+
+- name: start bot service
+  community.docker.docker_compose_v2:
+    project_src: /opt/rss-tg-bot
+    services:
+      - bot
