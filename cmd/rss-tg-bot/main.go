@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"log/slog"
-	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -15,9 +14,9 @@ import (
 	telegramfrontend "github.com/Pangolierchick/rss-tg-bot/internal/telegram/frontend"
 	tgsender "github.com/Pangolierchick/rss-tg-bot/internal/telegram/sender"
 	"github.com/Pangolierchick/rss-tg-bot/pkg/cron"
-	v2 "github.com/Pangolierchick/rss-tg-bot/pkg/rss/v2"
 	"github.com/go-telegram/bot"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/mmcdole/gofeed"
 )
 
 const (
@@ -77,7 +76,9 @@ func main() {
 
 	repo := repository.New(pool)
 
-	rss := v2.NewFetcher(http.DefaultClient)
+	rss := gofeed.NewParser()
+	rss.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
+
 	fetchService := fetcher.New(rss, repo, &fetcher.FetcherOpts{
 		Limit: 5,
 	})

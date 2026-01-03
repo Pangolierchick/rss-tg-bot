@@ -7,12 +7,8 @@ import (
 
 	"github.com/Pangolierchick/rss-tg-bot/internal/models"
 	r "github.com/Pangolierchick/rss-tg-bot/internal/repository"
-	v2 "github.com/Pangolierchick/rss-tg-bot/pkg/rss/v2"
+	"github.com/mmcdole/gofeed"
 )
-
-type rssFetcher interface {
-	Fetch(URL string) (*v2.Feed, error)
-}
 
 type repository interface {
 	GetLFUFeeds(ctx context.Context, params *r.GetLFUFeedsParams) ([]*models.Feed, error)
@@ -24,13 +20,13 @@ type FetcherOpts struct {
 }
 
 type Fetcher struct {
-	rss  rssFetcher
+	rss  *gofeed.Parser
 	repo repository
 
 	opts *FetcherOpts
 }
 
-func New(rss rssFetcher, repo repository, opts *FetcherOpts) *Fetcher {
+func New(rss *gofeed.Parser, repo repository, opts *FetcherOpts) *Fetcher {
 	return &Fetcher{
 		rss:  rss,
 		repo: repo,
@@ -47,7 +43,7 @@ func (f *Fetcher) Fetch(ctx context.Context) error {
 	}
 
 	for _, feed := range feeds {
-		rss, err := f.rss.Fetch(feed.URL)
+		rss, err := f.rss.ParseURLWithContext(feed.URL, ctx)
 
 		if err != nil {
 			slog.Error("failed to fetch rss",
@@ -57,7 +53,7 @@ func (f *Fetcher) Fetch(ctx context.Context) error {
 			continue
 		}
 
-		if len(rss.Channel.Items) == 0 {
+		if len(rss.Items) == 0 {
 			slog.Warn("no new items in channel",
 				"url", feed.URL,
 			)
@@ -66,20 +62,20 @@ func (f *Fetcher) Fetch(ctx context.Context) error {
 
 		slog.Debug("Recieved new items. Saving.",
 			"url", feed.URL,
-			"items", len(rss.Channel.Items),
+			"items", len(rss.Items),
 		)
 
-		modelItems := make([]*models.FeedItem, 0, len(rss.Channel.Items))
+		modelItems := make([]*models.FeedItem, 0, len(rss.Items))
 
-		for _, rssItem := range rss.Channel.Items {
+		for _, rssItem := range rss.Items {
 			h := sha1.New()
 			h.Write([]byte(rssItem.Title + rssItem.Description))
 			modelItems = append(modelItems, &models.FeedItem{
 				FeedID:      feed.ID,
-				GUID:        rssItem.ID,
+				GUID:        rssItem.GUID,
 				Title:       rssItem.Title,
 				Link:        rssItem.Link,
-				PublishedAt: &rssItem.ParsedPubDate,
+				PublishedAt: rssItem.PublishedParsed,
 				ContentHash: h.Sum(nil),
 			})
 		}

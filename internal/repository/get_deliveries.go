@@ -15,17 +15,18 @@ type GetDeliveriesParams struct {
 func (r *Repository) GetDeliveries(ctx context.Context, tx pgx.Tx, params *GetDeliveriesParams) ([]*models.Delivery, error) {
 	q := `
 select
-	delivery_id,
-	subscriber_id,
-	feed_item_id,
-	status,
-	sent_at,
-	created_at
-from deliveries
+    d.delivery_id,
+    d.subscriber_id,
+    d.feed_item_id,
+    d.status,
+    d.sent_at,
+    d.created_at
+from deliveries d
+join feed_items f on f.item_id = d.feed_item_id
 where
-	status = $1
-for update skip locked
-limit $2
+    d.status = $1
+order by f.published_at
+limit $2;
 	`
 	rows, err := tx.Query(ctx, q, params.Status, params.Limit)
 
