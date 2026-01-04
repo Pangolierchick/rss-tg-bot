@@ -14,6 +14,7 @@ import (
 	telegramfrontend "github.com/Pangolierchick/rss-tg-bot/internal/telegram/frontend"
 	tgsender "github.com/Pangolierchick/rss-tg-bot/internal/telegram/sender"
 	"github.com/Pangolierchick/rss-tg-bot/pkg/cron"
+	"github.com/enetx/surf"
 	"github.com/go-telegram/bot"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/mmcdole/gofeed"
@@ -76,8 +77,15 @@ func main() {
 
 	repo := repository.New(pool)
 
+	surfClient := surf.NewClient().
+		Builder().
+		Impersonate().Chrome().
+		Session().
+		Build()
+
+	stdClient := surfClient.Std()
 	rss := gofeed.NewParser()
-	rss.UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36"
+	rss.Client = stdClient
 
 	fetchService := fetcher.New(rss, repo, &fetcher.FetcherOpts{
 		Limit: 5,
