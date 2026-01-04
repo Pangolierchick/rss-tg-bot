@@ -183,9 +183,8 @@ func (t *TgFrontend) handleDeleteSubscription(ctx context.Context, b *bot.Bot, u
 
 func (t *TgFrontend) sendReply(chatID int64, text string) {
 	_, err := t.bot.SendMessage(context.Background(), &bot.SendMessageParams{
-		ChatID:    chatID,
-		Text:      text,
-		ParseMode: models.ParseModeMarkdownV1,
+		ChatID: chatID,
+		Text:   text,
 	})
 	if err != nil {
 		slog.Error("Error sending message to chat", "chat_id", chatID, "error", err)
