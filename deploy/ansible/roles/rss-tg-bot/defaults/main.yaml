@@ -1,3 +1,5 @@
-rss_tg_bot_versio n: 0.1.2
+rss_tg_bot_version: 0.1.2
 rss_tg_bot_repo: https://github.com/Pangolierchick/rss-tg-bot.git
 postgresql_dsn: postgresql://user:password@db:5432/rss-tg-bot
+fetch_cron: "0 0 */3"
+send_cron: "*/30 * *"

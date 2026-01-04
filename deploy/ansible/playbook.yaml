@@ -1,4 +1,4 @@
-- name: deploy rss-tg-bot
+- name: deploy rss-tg-bot prod
   hosts: prod
   become: true
   roles:
@@ -7,3 +7,17 @@
         docker_edition: "ce"
         docker_install_compose: true
     - role: rss-tg-bot
+      vars:
+        rss_tg_bot_version: 0.2.2
+
+- name: deploy rss-tg-bot stg
+  hosts: stg
+  become: true
+  roles:
+    - role: geerlingguy.docker
+      vars:
+        docker_edition: "ce"
+        docker_install_compose: true
+    - role: rss-tg-bot
+      vars:
+        rss_tg_bot_version: 0.2.2

@@ -7,7 +7,7 @@ create_bin_dir:
 	mkdir -p $(BIN_DIR)
 
 build: create_bin_dir
-	go build -o $(BIN_DIR)/$(SERVICE_NAME) ./cmd/$(SERVICE_NAME)/main.go
+	CGO_ENABLED=0 go build -v -o $(BIN_DIR)/$(SERVICE_NAME) ./cmd/$(SERVICE_NAME)/main.go
 
 run:
 	go run ./cmd/$(SERVICE_NAME)/main.go

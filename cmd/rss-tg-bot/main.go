@@ -23,11 +23,15 @@ import (
 const (
 	telegramTokenEnv = "TELEGRAM_TOKEN"
 	postgresqlDSN    = "POSTGRESQL_DSN"
+	fetchingCron     = "FETCH_CRON"
+	sendCron         = "SEND_CRON"
 )
 
 type Config struct {
 	TelegramToken string
 	PostgresqlDSN string
+	FetchCron     string
+	SendCron      string
 }
 
 func readConfig() Config {
@@ -45,9 +49,24 @@ func readConfig() Config {
 		os.Exit(1)
 	}
 
+	fetchCron, ok := os.LookupEnv(fetchingCron)
+
+	if !ok {
+		slog.Error("FETCH_CRON must be provided")
+		os.Exit(1)
+	}
+	sendCron, ok := os.LookupEnv(sendCron)
+
+	if !ok {
+		slog.Error("SEND_CRON must be provided")
+		os.Exit(1)
+	}
+
 	return Config{
 		TelegramToken: token,
 		PostgresqlDSN: dsn,
+		FetchCron:     fetchCron,
+		SendCron:      sendCron,
 	}
 }
 
@@ -107,7 +126,7 @@ func main() {
 	frontend := telegramfrontend.New(telegram, subscriptionerService)
 
 	crontab := cron.New()
-	crontab.AddTask("0 */30 *", func() {
+	crontab.AddTask(config.FetchCron, func() {
 		slog.Debug("fetching new items")
 		err := fetchService.Fetch(ctx)
 
@@ -116,7 +135,7 @@ func main() {
 		}
 	})
 
-	crontab.AddTask("*/30 * *", func() {
+	crontab.AddTask(config.SendCron, func() {
 		slog.Debug("sending new deliveries")
 		err := senderService.SendBatch(ctx, 50)
 
