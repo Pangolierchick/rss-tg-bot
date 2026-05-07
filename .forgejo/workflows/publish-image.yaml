@@ -1,0 +1,147 @@
+name: publish-image
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+
+jobs:
+  verify:
+    name: Verify build
+    runs-on: docker
+    container:
+      image: docker.io/library/node:20-bookworm
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Check out repository
+        uses: https://data.forgejo.org/actions/checkout@v4
+
+      - name: Set up Go
+        uses: https://data.forgejo.org/actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Verify Go packages compile
+        run: go test ./...
+
+      - name: Verify Linux binary build
+        run: make build-linux
+
+  publish:
+    name: Publish image
+    needs: verify
+    if: ${{ forgejo.event_name != 'pull_request' }}
+    runs-on: docker
+    container:
+      image: docker.io/library/node:20-bookworm
+    defaults:
+      run:
+        shell: bash
+    env:
+      REGISTRY_PASSWORD: ${{ secrets.FORGEJO_REGISTRY_TOKEN }}
+      REGISTRY_USERNAME: ${{ vars.FORGEJO_REGISTRY_USER }}
+    steps:
+      - name: Decide whether this run should publish
+        id: gate
+        env:
+          EVENT_NAME: ${{ forgejo.event_name }}
+        run: |
+          set -euo pipefail
+
+          publish=false
+
+          if [[ "${EVENT_NAME}" == "workflow_dispatch" ]]; then
+            publish=true
+          elif [[ "${FORGEJO_REF}" == "refs/heads/main" ]]; then
+            publish=true
+          elif [[ "${FORGEJO_REF}" == refs/tags/v* ]]; then
+            publish=true
+          fi
+
+          echo "publish=${publish}" >> "${GITHUB_OUTPUT}"
+
+      - name: Check out repository
+        if: ${{ steps.gate.outputs.publish == 'true' }}
+        uses: https://data.forgejo.org/actions/checkout@v4
+
+      - name: Verify Docker access on the runner
+        if: ${{ steps.gate.outputs.publish == 'true' }}
+        run: docker info > /dev/null
+
+      - name: Set up Docker Buildx
+        if: ${{ steps.gate.outputs.publish == 'true' }}
+        uses: https://github.com/docker/setup-buildx-action@v3
+
+      - name: Compute image tags
+        id: meta
+        if: ${{ steps.gate.outputs.publish == 'true' }}
+        run: |
+          set -euo pipefail
+
+          registry="${FORGEJO_SERVER_URL#https://}"
+          registry="${registry#http://}"
+          image_repo="$(echo "${FORGEJO_REPOSITORY}" | tr '[:upper:]' '[:lower:]')"
+          image="${registry}/${image_repo}"
+          short_sha="${FORGEJO_SHA:0:7}"
+
+          tags=("${image}:sha-${short_sha}")
+
+          if [[ "${FORGEJO_REF}" == "refs/heads/main" ]]; then
+            tags+=("${image}:main")
+          fi
+
+          if [[ "${FORGEJO_REF}" == refs/tags/* ]]; then
+            version="${FORGEJO_REF_NAME}"
+            clean_version="${version#v}"
+            tags+=("${image}:${version}" "${image}:${clean_version}")
+
+            if [[ "${clean_version}" =~ ^([0-9]+)\.([0-9]+)\.([0-9]+)$ ]]; then
+              tags+=(
+                "${image}:${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+                "${image}:${BASH_REMATCH[1]}"
+                "${image}:latest"
+              )
+            fi
+          fi
+
+          {
+            echo "registry=${registry}"
+            echo "image=${image}"
+            printf "tags<<EOF\n%s\nEOF\n" "$(printf "%s\n" "${tags[@]}" | sort -u)"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Validate registry credentials
+        id: registry-auth
+        if: ${{ steps.gate.outputs.publish == 'true' }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${REGISTRY_PASSWORD}" ]]; then
+            echo "Repository secret FORGEJO_REGISTRY_TOKEN is required."
+            echo "Use a Forgejo personal access token with write:packages permission."
+            exit 1
+          fi
+
+          username="${REGISTRY_USERNAME:-${FORGEJO_ACTOR}}"
+          echo "username=${username}" >> "${GITHUB_OUTPUT}"
+
+      - name: Login to Forgejo container registry
+        if: ${{ steps.gate.outputs.publish == 'true' }}
+        uses: https://github.com/docker/login-action@v3
+        with:
+          registry: ${{ steps.meta.outputs.registry }}
+          username: ${{ steps.registry-auth.outputs.username }}
+          password: ${{ env.REGISTRY_PASSWORD }}
+
+      - name: Build and push image
+        if: ${{ steps.gate.outputs.publish == 'true' }}
+        uses: https://github.com/docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=${{ forgejo.server_url }}/${{ forgejo.repository }}
+            org.opencontainers.image.revision=${{ forgejo.sha }}
