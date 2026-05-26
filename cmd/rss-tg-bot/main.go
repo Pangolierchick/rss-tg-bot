@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -36,7 +37,8 @@ type Config struct {
 }
 
 type TelegramConfig struct {
-	Token string `yaml:"token"`
+	Token    string `yaml:"token"`
+	ProxyURL string `yaml:"proxy_url"`
 }
 
 type DatabaseConfig struct {
@@ -46,6 +48,7 @@ type DatabaseConfig struct {
 type FetchConfig struct {
 	Interval string        `yaml:"interval"`
 	Limit    int           `yaml:"limit"`
+	ProxyURL string        `yaml:"proxy_url"`
 	Every    time.Duration `yaml:"-"`
 }
 
@@ -137,14 +140,32 @@ func main() {
 		return
 	}
 
-	stdClient := &http.Client{Timeout: 30 * time.Second}
+	stdClient, err := httpClient(30*time.Second, config.Fetch.ProxyURL)
+	if err != nil {
+		slog.Error("failed to configure fetch http client",
+			"error", err,
+		)
+		return
+	}
 	rss := gofeed.NewParser()
 
 	fetchService := fetcher.New(rss, stdClient, repo, &fetcher.FetcherOpts{
 		Limit: config.Fetch.Limit,
 	})
 
-	telegram, err := bot.New(config.Telegram.Token)
+	telegramOpts := make([]bot.Option, 0, 1)
+	if config.Telegram.ProxyURL != "" {
+		telegramHTTPClient, err := httpClient(time.Minute, config.Telegram.ProxyURL)
+		if err != nil {
+			slog.Error("failed to configure telegram proxy",
+				"error", err,
+			)
+			return
+		}
+		telegramOpts = append(telegramOpts, bot.WithHTTPClient(time.Minute, telegramHTTPClient))
+	}
+
+	telegram, err := bot.New(config.Telegram.Token, telegramOpts...)
 
 	if err != nil {
 		slog.Error("failed to init telegram bot",
@@ -191,6 +212,24 @@ func main() {
 
 func sqliteDSN(path string) string {
 	return path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
+}
+
+func httpClient(timeout time.Duration, proxyURL string) (*http.Client, error) {
+	client := &http.Client{Timeout: timeout}
+	if proxyURL == "" {
+		return client, nil
+	}
+
+	parsedProxyURL, err := url.Parse(proxyURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse proxy url: %w", err)
+	}
+
+	client.Transport = &http.Transport{
+		Proxy: http.ProxyURL(parsedProxyURL),
+	}
+
+	return client, nil
 }
 
 func runEvery(ctx context.Context, interval time.Duration, task func(context.Context)) <-chan struct{} {
