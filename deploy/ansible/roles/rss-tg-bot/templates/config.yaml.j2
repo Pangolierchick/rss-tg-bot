@@ -1,0 +1,15 @@
+telegram:
+  token: "{{ telegram_token }}"
+  proxy_url: "{{ telegram_proxy_url | default('') }}"
+
+database:
+  path: "{{ sqlite_path }}"
+
+fetch:
+  interval: "{{ fetch_interval }}"
+  limit: {{ fetch_limit }}
+  proxy_url: "{{ fetch_proxy_url | default('') }}"
+
+send:
+  interval: "{{ send_interval }}"
+  batch_size: {{ send_batch_size }}

@@ -1,5 +1,9 @@
 rss_tg_bot_version: 0.1.2
 rss_tg_bot_repo: https://github.com/Pangolierchick/rss-tg-bot.git
-postgresql_dsn: postgresql://user:password@db:5432/rss-tg-bot
-fetch_cron: "0 0 */3"
-send_cron: "*/30 * *"
+telegram_proxy_url: ""
+sqlite_path: /data/rss-tg-bot.db
+fetch_interval: 3h
+fetch_limit: 5
+fetch_proxy_url: ""
+send_interval: 30s
+send_batch_size: 50

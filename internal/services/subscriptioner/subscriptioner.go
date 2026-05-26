@@ -9,7 +9,8 @@ import (
 )
 
 var (
-	SubscriptionsLimit int64 = 20
+	SubscriptionsLimit        int64 = 20
+	SubscriptionBackfillLimit int64 = 0
 )
 
 type repository interface {
@@ -18,7 +19,7 @@ type repository interface {
 	AddSubscription(ctx context.Context, subscription *models.Subscription) error
 	AddSubscriber(ctx context.Context, subscriber *models.Subscriber) (int64, error)
 	AddFeed(ctx context.Context, feed *models.Feed) (int64, error)
-	DispatchMessages(ctx context.Context, subscriberID int64) error
+	DispatchMessages(ctx context.Context, subscriberID, feedID, limit int64) error
 
 	GetFeedByURL(ctx context.Context, URL string) (*models.Feed, error)
 	GetSubscriberByTg(ctx context.Context, tgChatID int64) (*models.Subscriber, error)
@@ -93,7 +94,7 @@ func (s *Subscriptioner) AddSubscription(ctx context.Context, params *AddSubscri
 		return err
 	}
 
-	if err := s.repo.DispatchMessages(ctx, subscriberID); err != nil {
+	if err := s.repo.DispatchMessages(ctx, subscriberID, feedID, SubscriptionBackfillLimit); err != nil {
 		slog.Error("failed to dispatch existing items",
 			"subscriber_id", subscriberID,
 			"feed_id", feedID,

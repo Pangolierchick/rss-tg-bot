@@ -1,5 +1,6 @@
 telegram:
   token: "replace-me"
+  proxy_url: ""
 
 database:
   path: "rss-tg-bot.db"
@@ -7,6 +8,7 @@ database:
 fetch:
   interval: "3h"
   limit: 5
+  proxy_url: ""
 
 send:
   interval: "30s"

@@ -9,7 +9,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-func TestDispatchMessagesSQLite(t *testing.T) {
+func TestDispatchMessagesSQLiteSkipsBackfillWhenLimitIsZero(t *testing.T) {
 	ctx := context.Background()
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -46,7 +46,66 @@ func TestDispatchMessagesSQLite(t *testing.T) {
 	if err := repo.AddSubscription(ctx, &models.Subscription{FeedID: feedID, SubscriberID: subscriberID}); err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.DispatchMessages(ctx, subscriberID); err != nil {
+	if err := repo.DispatchMessages(ctx, subscriberID, feedID, 0); err != nil {
+		t.Fatal(err)
+	}
+
+	tx, err := repo.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+
+	deliveries, err := repo.GetDeliveries(ctx, tx, &GetDeliveriesParams{
+		Status: models.DeliveryStatusPending,
+		Limit:  10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(deliveries) != 0 {
+		t.Fatalf("expected no deliveries, got %d", len(deliveries))
+	}
+}
+
+func TestDispatchMessagesSQLiteBackfillsOnlyRequestedFeedLimit(t *testing.T) {
+	ctx := context.Background()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+
+	repo := New(db)
+	if err := repo.Init(ctx); err != nil {
+		t.Fatal(err)
+	}
+
+	feedID, err := repo.AddFeed(ctx, &models.Feed{URL: "https://example.com/rss.xml"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherFeedID, err := repo.AddFeed(ctx, &models.Feed{URL: "https://example.com/other.xml"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.AddFeedItems(ctx, []*models.FeedItem{
+		{FeedID: feedID, GUID: "guid-1", Title: "Title 1", Link: "https://example.com/1", ContentHash: []byte("hash-1")},
+		{FeedID: feedID, GUID: "guid-2", Title: "Title 2", Link: "https://example.com/2", ContentHash: []byte("hash-2")},
+		{FeedID: otherFeedID, GUID: "other-guid", Title: "Other", Link: "https://example.com/other", ContentHash: []byte("other-hash")},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	subscriberID, err := repo.AddSubscriber(ctx, &models.Subscriber{TgChatID: 123})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.AddSubscription(ctx, &models.Subscription{FeedID: feedID, SubscriberID: subscriberID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.DispatchMessages(ctx, subscriberID, feedID, 1); err != nil {
 		t.Fatal(err)
 	}
 
