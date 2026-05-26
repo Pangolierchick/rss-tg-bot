@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/go-telegram/bot"
-	"github.com/go-telegram/bot/models"
 	"golang.org/x/time/rate"
 )
 
@@ -28,9 +27,8 @@ func (t *TgSender) Send(ctx context.Context, ID any, message string) error {
 		return fmt.Errorf("failed to send tg message: rate limit exceded")
 	}
 	_, err := t.bot.SendMessage(ctx, &bot.SendMessageParams{
-		ChatID:    ID,
-		Text:      message,
-		ParseMode: models.ParseModeMarkdownV1,
+		ChatID: ID,
+		Text:   message,
 	})
 
 	return err

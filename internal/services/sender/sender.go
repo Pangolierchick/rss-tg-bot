@@ -2,12 +2,12 @@ package sender
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"log/slog"
 
 	"github.com/Pangolierchick/rss-tg-bot/internal/models"
 	r "github.com/Pangolierchick/rss-tg-bot/internal/repository"
-	"github.com/jackc/pgx/v5"
 )
 
 type messageSender interface {
@@ -15,9 +15,9 @@ type messageSender interface {
 }
 
 type repository interface {
-	SetSentStatusDeliveries(ctx context.Context, tx pgx.Tx, deliveryIDs []int64) error
-	GetDeliveries(ctx context.Context, tx pgx.Tx, params *r.GetDeliveriesParams) ([]*models.Delivery, error)
-	Begin(ctx context.Context) (pgx.Tx, error)
+	SetSentStatusDeliveries(ctx context.Context, tx *sql.Tx, deliveryIDs []int64) error
+	GetDeliveries(ctx context.Context, tx *sql.Tx, params *r.GetDeliveriesParams) ([]*models.Delivery, error)
+	Begin(ctx context.Context) (*sql.Tx, error)
 	GetSubscriber(ctx context.Context, subscriberID int64) (*models.Subscriber, error)
 	GetFeedItem(ctx context.Context, feedItemID int64) (*models.FeedItem, error)
 }
@@ -36,7 +36,6 @@ func New(repo repository, sender messageSender) *Service {
 
 func (s *Service) SendBatch(ctx context.Context, limit int64) error {
 	tx, err := s.repo.Begin(ctx)
-
 	if err != nil {
 		slog.Error("failed to begin transaction",
 			"error", err,
@@ -44,15 +43,19 @@ func (s *Service) SendBatch(ctx context.Context, limit int64) error {
 		return err
 	}
 
-	defer tx.Rollback(ctx)
-
 	deliveries, err := s.repo.GetDeliveries(ctx, tx, &r.GetDeliveriesParams{
 		Status: models.DeliveryStatusPending,
 		Limit:  limit,
 	})
-
 	if err != nil {
+		_ = tx.Rollback()
 		slog.Error("failed to get pending deliveries",
+			"error", err,
+		)
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		slog.Error("failed to commit deliveries read transaction",
 			"error", err,
 		)
 		return err
@@ -97,8 +100,20 @@ func (s *Service) SendBatch(ctx context.Context, limit int64) error {
 		successedDeliveryIDs = append(successedDeliveryIDs, delivery.ID)
 	}
 
-	err = s.repo.SetSentStatusDeliveries(ctx, tx, successedDeliveryIDs)
+	if len(successedDeliveryIDs) == 0 {
+		return nil
+	}
 
+	tx, err = s.repo.Begin(ctx)
+	if err != nil {
+		slog.Error("failed to begin transaction",
+			"error", err,
+		)
+		return err
+	}
+	defer tx.Rollback()
+
+	err = s.repo.SetSentStatusDeliveries(ctx, tx, successedDeliveryIDs)
 	if err != nil {
 		slog.Error("failed to set sent status on deliveries",
 			"error", err,
@@ -107,9 +122,9 @@ func (s *Service) SendBatch(ctx context.Context, limit int64) error {
 		return err
 	}
 
-	return tx.Commit(ctx)
+	return tx.Commit()
 }
 
 func collectMessage(f *models.FeedItem) string {
-	return fmt.Sprintf("*%s*\n\n%s", f.Title, f.Link)
+	return fmt.Sprintf("%s\n\n%s", f.Title, f.Link)
 }

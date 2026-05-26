@@ -2,9 +2,9 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/Pangolierchick/rss-tg-bot/internal/models"
-	"github.com/jackc/pgx/v5"
 )
 
 func (r *Repository) GetFeedByURL(ctx context.Context, URL string) (*models.Feed, error) {
@@ -18,16 +18,32 @@ select
 	created_at
 from feeds
 where
-	url = $1
+	url = ?
 	`
 
-	rows, err := r.pool.Query(ctx, q, URL)
+	return scanFeed(r.db.QueryRowContext(ctx, q, URL))
+}
 
-	if err != nil {
+func scanFeed(row *sql.Row) (*models.Feed, error) {
+	var feed models.Feed
+	var lastModified sql.NullInt64
+	var lastFetchedAt int64
+	var createdAt int64
+
+	if err := row.Scan(
+		&feed.ID,
+		&feed.URL,
+		&feed.ETag,
+		&lastModified,
+		&lastFetchedAt,
+		&createdAt,
+	); err != nil {
 		return nil, err
 	}
 
-	feed, err := pgx.CollectExactlyOneRow(rows, pgx.RowToAddrOfStructByName[models.Feed])
+	feed.LastModified = scanNullUnixTime(lastModified)
+	feed.LastFetchedAt = scanUnixTime(lastFetchedAt)
+	feed.CreatedAt = scanUnixTime(createdAt)
 
-	return feed, err
+	return &feed, nil
 }

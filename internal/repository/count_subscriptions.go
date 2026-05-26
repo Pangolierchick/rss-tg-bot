@@ -9,11 +9,11 @@ select
 from subscribers
 join subscriptions using (subscriber_id)
 where
-	tg_chat_id = $1
+	tg_chat_id = ?
 	`
 
 	var count int64
-	err := r.pool.QueryRow(ctx, q, tgChatId).Scan(&count)
+	err := r.db.QueryRowContext(ctx, q, tgChatId).Scan(&count)
 
 	return count, err
 }

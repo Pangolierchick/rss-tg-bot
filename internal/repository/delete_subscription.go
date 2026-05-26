@@ -6,11 +6,11 @@ func (r *Repository) DeleteSubscription(ctx context.Context, feedID, subscriberI
 	q := `
 delete from subscriptions
 where
-	feed_id = $1 and
-	subscriber_id = $2
+	feed_id = ? and
+	subscriber_id = ?
 	`
 
-	_, err := r.pool.Exec(ctx, q, feedID, subscriberID)
+	_, err := r.db.ExecContext(ctx, q, feedID, subscriberID)
 
 	return err
 }

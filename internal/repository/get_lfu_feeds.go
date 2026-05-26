@@ -2,9 +2,9 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 
 	"github.com/Pangolierchick/rss-tg-bot/internal/models"
-	"github.com/jackc/pgx/v5"
 )
 
 type GetLFUFeedsParams struct {
@@ -27,16 +27,49 @@ select
 from feeds
 join current_subscriptions using (feed_id)
 order by last_fetched_at asc
-limit $1
+limit ?
  `
 
-	rows, err := r.pool.Query(ctx, q, params.Limit)
+	rows, err := r.db.QueryContext(ctx, q, params.Limit)
 
 	if err != nil {
 		return nil, err
 	}
+	defer rows.Close()
 
-	feeds, err := pgx.CollectRows(rows, pgx.RowToAddrOfStructByName[models.Feed])
+	feeds := make([]*models.Feed, 0, params.Limit)
+	for rows.Next() {
+		feed, err := scanFeedRows(rows)
+		if err != nil {
+			return nil, err
+		}
 
-	return feeds, err
+		feeds = append(feeds, feed)
+	}
+
+	return feeds, rows.Err()
+}
+
+func scanFeedRows(rows *sql.Rows) (*models.Feed, error) {
+	var feed models.Feed
+	var lastModified sql.NullInt64
+	var lastFetchedAt int64
+	var createdAt int64
+
+	if err := rows.Scan(
+		&feed.ID,
+		&feed.URL,
+		&feed.ETag,
+		&lastModified,
+		&lastFetchedAt,
+		&createdAt,
+	); err != nil {
+		return nil, err
+	}
+
+	feed.LastModified = scanNullUnixTime(lastModified)
+	feed.LastFetchedAt = scanUnixTime(lastFetchedAt)
+	feed.CreatedAt = scanUnixTime(createdAt)
+
+	return &feed, nil
 }

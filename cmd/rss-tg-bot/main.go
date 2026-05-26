@@ -2,10 +2,15 @@ package main
 
 import (
 	"context"
+	"database/sql"
+	"flag"
+	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/Pangolierchick/rss-tg-bot/internal/repository"
 	"github.com/Pangolierchick/rss-tg-bot/internal/services/fetcher"
@@ -13,61 +18,89 @@ import (
 	"github.com/Pangolierchick/rss-tg-bot/internal/services/subscriptioner"
 	telegramfrontend "github.com/Pangolierchick/rss-tg-bot/internal/telegram/frontend"
 	tgsender "github.com/Pangolierchick/rss-tg-bot/internal/telegram/sender"
-	"github.com/Pangolierchick/rss-tg-bot/pkg/cron"
-	"github.com/enetx/surf"
 	"github.com/go-telegram/bot"
-	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/mmcdole/gofeed"
+	"gopkg.in/yaml.v3"
+	_ "modernc.org/sqlite"
 )
 
 const (
-	telegramTokenEnv = "TELEGRAM_TOKEN"
-	postgresqlDSN    = "POSTGRESQL_DSN"
-	fetchingCron     = "FETCH_CRON"
-	sendCron         = "SEND_CRON"
+	defaultConfigPath = "config.yaml"
 )
 
 type Config struct {
-	TelegramToken string
-	PostgresqlDSN string
-	FetchCron     string
-	SendCron      string
+	Telegram TelegramConfig `yaml:"telegram"`
+	Database DatabaseConfig `yaml:"database"`
+	Fetch    FetchConfig    `yaml:"fetch"`
+	Send     SendConfig     `yaml:"send"`
 }
 
-func readConfig() Config {
-	token, ok := os.LookupEnv(telegramTokenEnv)
+type TelegramConfig struct {
+	Token string `yaml:"token"`
+}
 
-	if !ok {
-		slog.Error("TELEGRAM_TOKEN must be provided")
-		os.Exit(1)
+type DatabaseConfig struct {
+	Path string `yaml:"path"`
+}
+
+type FetchConfig struct {
+	Interval string        `yaml:"interval"`
+	Limit    int           `yaml:"limit"`
+	Every    time.Duration `yaml:"-"`
+}
+
+type SendConfig struct {
+	Interval  string        `yaml:"interval"`
+	BatchSize int64         `yaml:"batch_size"`
+	Every     time.Duration `yaml:"-"`
+}
+
+func readConfig(path string) (Config, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return Config{}, fmt.Errorf("read config: %w", err)
 	}
 
-	dsn, ok := os.LookupEnv(postgresqlDSN)
-
-	if !ok {
-		slog.Error("POSTGRESQL_DSN must be provided")
-		os.Exit(1)
+	var config Config
+	if err := yaml.Unmarshal(raw, &config); err != nil {
+		return Config{}, fmt.Errorf("parse config: %w", err)
 	}
 
-	fetchCron, ok := os.LookupEnv(fetchingCron)
-
-	if !ok {
-		slog.Error("FETCH_CRON must be provided")
-		os.Exit(1)
+	if config.Telegram.Token == "" {
+		return Config{}, fmt.Errorf("telegram.token must be provided")
 	}
-	sendCron, ok := os.LookupEnv(sendCron)
-
-	if !ok {
-		slog.Error("SEND_CRON must be provided")
-		os.Exit(1)
+	if config.Database.Path == "" {
+		return Config{}, fmt.Errorf("database.path must be provided")
+	}
+	if config.Fetch.Interval == "" {
+		return Config{}, fmt.Errorf("fetch.interval must be provided")
+	}
+	if config.Send.Interval == "" {
+		return Config{}, fmt.Errorf("send.interval must be provided")
 	}
 
-	return Config{
-		TelegramToken: token,
-		PostgresqlDSN: dsn,
-		FetchCron:     fetchCron,
-		SendCron:      sendCron,
+	config.Fetch.Every, err = time.ParseDuration(config.Fetch.Interval)
+	if err != nil {
+		return Config{}, fmt.Errorf("parse fetch.interval: %w", err)
 	}
+	config.Send.Every, err = time.ParseDuration(config.Send.Interval)
+	if err != nil {
+		return Config{}, fmt.Errorf("parse send.interval: %w", err)
+	}
+	if config.Fetch.Every <= 0 {
+		return Config{}, fmt.Errorf("fetch.interval must be positive")
+	}
+	if config.Send.Every <= 0 {
+		return Config{}, fmt.Errorf("send.interval must be positive")
+	}
+	if config.Fetch.Limit <= 0 {
+		config.Fetch.Limit = 5
+	}
+	if config.Send.BatchSize <= 0 {
+		config.Send.BatchSize = 50
+	}
+
+	return config, nil
 }
 
 func main() {
@@ -76,41 +109,42 @@ func main() {
 	}))
 	slog.SetDefault(logger)
 
-	config := readConfig()
+	configPath := flag.String("config", defaultConfigPath, "path to YAML config file")
+	flag.Parse()
+
+	config, err := readConfig(*configPath)
+	if err != nil {
+		slog.Error("failed to read config", "error", err)
+		return
+	}
 
 	ctx := context.Background()
 	ctx, cancel := context.WithCancel(ctx)
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 
-	poolConfig, err := pgxpool.ParseConfig(config.PostgresqlDSN)
+	db, err := sql.Open("sqlite", sqliteDSN(config.Database.Path))
 	if err != nil {
-		slog.Error("failed to parse config", "error", err)
+		slog.Error("failed to open database", "error", err)
 		return
 	}
-	pool, err := pgxpool.NewWithConfig(ctx, poolConfig)
-	if err != nil {
-		slog.Error("failed to get db pool", "error", err)
+	defer db.Close()
+	db.SetMaxOpenConns(1)
+
+	repo := repository.New(db)
+	if err := repo.Init(ctx); err != nil {
+		slog.Error("failed to initialize database", "error", err)
 		return
 	}
 
-	repo := repository.New(pool)
-
-	surfClient := surf.NewClient().
-		Builder().
-		Impersonate().Chrome().
-		Session().
-		Build()
-
-	stdClient := surfClient.Std()
+	stdClient := &http.Client{Timeout: 30 * time.Second}
 	rss := gofeed.NewParser()
-	rss.Client = stdClient
 
-	fetchService := fetcher.New(rss, repo, &fetcher.FetcherOpts{
-		Limit: 5,
+	fetchService := fetcher.New(rss, stdClient, repo, &fetcher.FetcherOpts{
+		Limit: config.Fetch.Limit,
 	})
 
-	telegram, err := bot.New(config.TelegramToken)
+	telegram, err := bot.New(config.Telegram.Token)
 
 	if err != nil {
 		slog.Error("failed to init telegram bot",
@@ -125,8 +159,7 @@ func main() {
 	subscriptionerService := subscriptioner.New(repo)
 	frontend := telegramfrontend.New(telegram, subscriptionerService)
 
-	crontab := cron.New()
-	crontab.AddTask(config.FetchCron, func() {
+	fetchDone := runEvery(ctx, config.Fetch.Every, func(ctx context.Context) {
 		slog.Debug("fetching new items")
 		err := fetchService.Fetch(ctx)
 
@@ -135,23 +168,58 @@ func main() {
 		}
 	})
 
-	crontab.AddTask(config.SendCron, func() {
+	sendDone := runEvery(ctx, config.Send.Every, func(ctx context.Context) {
 		slog.Debug("sending new deliveries")
-		err := senderService.SendBatch(ctx, 50)
+		err := senderService.SendBatch(ctx, config.Send.BatchSize)
 
 		if err != nil {
 			slog.Error("failed to send batch", "error", err)
 		}
 	})
 
-	cronWait := crontab.Run(ctx)
 	frontend.Run(ctx)
 
 	slog.Info("App started")
 
 	<-signals
 	cancel()
-	<-cronWait
+	<-fetchDone
+	<-sendDone
 
 	slog.Info("Exitting")
+}
+
+func sqliteDSN(path string) string {
+	return path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
+}
+
+func runEvery(ctx context.Context, interval time.Duration, task func(context.Context)) <-chan struct{} {
+	done := make(chan struct{})
+
+	go func() {
+		defer close(done)
+
+		timer := time.NewTimer(0)
+		defer timer.Stop()
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-timer.C:
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							slog.Error("timer task panicked", "reason", r)
+						}
+					}()
+
+					task(ctx)
+				}()
+				timer.Reset(interval)
+			}
+		}
+	}()
+
+	return done
 }

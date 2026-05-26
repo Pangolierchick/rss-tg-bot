@@ -10,10 +10,10 @@ from subscriptions
 join subscribers using (subscriber_id)
 join feeds using (feed_id)
 where
-	tg_chat_id = $1
+	tg_chat_id = ?
 	`
 
-	rows, err := r.pool.Query(ctx, q, tgChatID)
+	rows, err := r.db.QueryContext(ctx, q, tgChatID)
 
 	if err != nil {
 		return nil, err

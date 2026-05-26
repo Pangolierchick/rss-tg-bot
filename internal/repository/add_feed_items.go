@@ -2,10 +2,11 @@ package repository
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/Pangolierchick/rss-tg-bot/internal/models"
-	"github.com/jackc/pgx/v5"
 )
 
 func (r *Repository) AddFeedItems(ctx context.Context, items []*models.FeedItem) error {
@@ -13,70 +14,52 @@ func (r *Repository) AddFeedItems(ctx context.Context, items []*models.FeedItem)
 		return nil
 	}
 
-	tx, err := r.pool.Begin(ctx)
+	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
-	defer tx.Rollback(ctx)
+	defer tx.Rollback()
 
 	qInsert := `
-insert into feed_items (feed_id, guid, title, link, published_at, content_hash)
-values ($1, $2, $3, $4, $5, $6)
-on conflict do nothing
+insert or ignore into feed_items (feed_id, guid, title, link, published_at, content_hash)
+values (?, ?, ?, ?, ?, ?)
 returning item_id;
 	`
 
 	qDispatch := `
-insert into deliveries (subscriber_id, feed_item_id)
+insert or ignore into deliveries (subscriber_id, feed_item_id)
 select
     s.subscriber_id,
-    fi.id
-from
-    subscriptions s
-cross join
-    unnest($1::bigint[]) as fi(id)
+    ?
+from subscriptions s
 where
-    s.feed_id = $2
-on conflict do nothing;
+    s.feed_id = ?;
 	`
 
-	batch := &pgx.Batch{}
 	for _, item := range items {
-		batch.Queue(qInsert, item.FeedID, item.GUID, item.Title, item.Link, item.PublishedAt, item.ContentHash)
-	}
-
-	results := tx.SendBatch(ctx, batch)
-	defer results.Close()
-
-	var insertedItemIDs []int64
-	for i := 0; i < batch.Len(); i++ {
-		row, err := results.Query()
+		var itemID int64
+		err := tx.QueryRowContext(
+			ctx,
+			qInsert,
+			item.FeedID,
+			item.GUID,
+			item.Title,
+			item.Link,
+			unixTimePtr(item.PublishedAt),
+			item.ContentHash,
+		).Scan(&itemID)
 		if err != nil {
-			return fmt.Errorf("error in batch statement %d: %w", i, err)
-		}
-
-		for row.Next() {
-			var itemID int64
-			err := row.Scan(&itemID)
-			if err != nil {
-				row.Close()
-				return fmt.Errorf("error scanning item_id: %w", err)
+			if errors.Is(err, sql.ErrNoRows) {
+				continue
 			}
-			insertedItemIDs = append(insertedItemIDs, itemID)
+
+			return fmt.Errorf("insert feed item: %w", err)
 		}
-		row.Close()
-	}
 
-	if err := results.Close(); err != nil {
-		return err
-	}
-
-	if len(insertedItemIDs) > 0 {
-		_, err := tx.Exec(ctx, qDispatch, insertedItemIDs, items[0].FeedID)
-		if err != nil {
-			return fmt.Errorf("error dispatching deliveries: %w", err)
+		if _, err := tx.ExecContext(ctx, qDispatch, itemID, item.FeedID); err != nil {
+			return fmt.Errorf("dispatch deliveries: %w", err)
 		}
 	}
 
-	return tx.Commit(ctx)
+	return tx.Commit()
 }

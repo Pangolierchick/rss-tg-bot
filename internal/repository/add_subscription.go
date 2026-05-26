@@ -8,12 +8,11 @@ import (
 
 func (r *Repository) AddSubscription(ctx context.Context, subscription *models.Subscription) error {
 	q := `
-insert into subscriptions (feed_id, subscriber_id)
-values ($1, $2)
-on conflict do nothing
+insert or ignore into subscriptions (feed_id, subscriber_id)
+values (?, ?)
 	`
 
-	_, err := r.pool.Exec(ctx, q, subscription.FeedID, subscription.SubscriberID)
+	_, err := r.db.ExecContext(ctx, q, subscription.FeedID, subscription.SubscriberID)
 
 	return err
 }

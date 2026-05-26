@@ -8,29 +8,28 @@ with users_subscriptions as (
 	select
 		feed_id
 	from subscriptions
-	where
-		subscriber_id = $1
+where
+		subscriber_id = ?
 ), items_to_send as (
 	select
 		item_id
 	from feed_items
 	where
-		feed_id = any((select * from users_subscriptions))
+		feed_id in (select feed_id from users_subscriptions)
 	except
 	select
 		feed_item_id as item_id
 	from deliveries
 	where
-		subscriber_id = $1 and
+		subscriber_id = ? and
 	status = 'sent'
 )
-insert into deliveries (subscriber_id, feed_item_id, status)
-select $1, item_id, 'pending'
-from items_to_send
-on conflict do nothing;
+insert or ignore into deliveries (subscriber_id, feed_item_id, status)
+select ?, item_id, 'pending'
+from items_to_send;
 	`
 
-	_, err := r.pool.Exec(ctx, q, subscriberID)
+	_, err := r.db.ExecContext(ctx, q, subscriberID, subscriberID, subscriberID)
 
 	return err
 }

@@ -1,0 +1,13 @@
+telegram:
+  token: "replace-me"
+
+database:
+  path: "rss-tg-bot.db"
+
+fetch:
+  interval: "3h"
+  limit: 5
+
+send:
+  interval: "30s"
+  batch_size: 50
